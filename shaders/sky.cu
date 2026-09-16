@@ -2,20 +2,8 @@
 
 #include <mi/neuraylib/target_code_types.h>
 
+#include "shared.hpp"
 
-struct Params
-{
-    uchar4* image;
-
-    unsigned int width;
-    unsigned int height;
-
-    float3 camera_position;
-
-    float3 camera_u;
-    float3 camera_v;
-    float3 camera_w;
-};
 
 // MDL-generated environment callable (external, resolved at pipeline link time
 // from the MDL module).
@@ -39,6 +27,12 @@ static __forceinline__ __device__
 float3 add3(const float3 a, const float3 b)
 {
     return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+static __forceinline__ __device__
+float3 sub3(const float3 a, const float3 b)
+{
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 static __forceinline__ __device__
@@ -67,26 +61,29 @@ void __raygen__sky()
         static_cast<float>(launch_index.y) + 0.5f
     );
 
-    // Normalized [0,1] coordinates.
     const float2 uv = make_float2(
         pixel.x / static_cast<float>(params.width),
         pixel.y / static_cast<float>(params.height)
     );
 
-    // Normalized image-plane coordinates [-1,+1].
+    const float aspect = static_cast<float>(params.width) / static_cast<float>(params.height);
+    // image-plane coordinates, aspect-corrected. 
     const float2 d = make_float2(
-        uv.x * 2.0f - 1.0f,
-        1.0f - uv.y * 2.0f
+        (uv.x * 2.0f - 1.0f) * aspect,
+        (1.0f - uv.y * 2.0f)
     );
 
     // Camera ray.
-    const float3 direction = normalize3(add3(params.camera_w, add3(mul3(d.x, params.camera_u), mul3(d.y, params.camera_v))));
+    const float3 forward = mul3(-1.0f, params.camera_w);
+    const float3 direction = normalize3(add3(forward, add3(mul3(d.x, params.camera_u), mul3(d.y, params.camera_v))));
+
+    unsigned int payload = 0;
 
     // No geometry is needed for this sky-only renderer.
     // A null traversable causes OptiX to invoke the miss
     // program directly.
     optixTrace(
-        0,
+        params.gas_handle,
         params.camera_position,
         direction,
         0.0f,
@@ -94,14 +91,70 @@ void __raygen__sky()
         0.0f, 
         OptixVisibilityMask(255),
 
-        OPTIX_RAY_FLAG_DISABLE_ANYHIT |
-        OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
+        OPTIX_RAY_FLAG_DISABLE_ANYHIT,
 
         0,      // SBT offset
         1,      // SBT stride
-        0);     // miss SBT index
+        0,      // miss SBT index
+
+        payload);
 }
 
+
+extern "C" __global__
+void __closesthit__sphere() 
+{
+    // Mark that we hit something.
+    optixSetPayload_0(1);
+
+    const HitGroupData* hitgroup_data = reinterpret_cast<const HitGroupData*>(optixGetSbtDataPointer());
+
+    // Geometric normal at the hit point.
+    // The built-in sphere IS does not report a normal directly, but we can
+    // reconstruct it from the hit position and the sphere center/radius.
+    // For a unit sphere at the origin, normal = normalize(hit_position).
+    // Here we need the sphere center and radius; pass them via launch params
+    // or store them in the SBT record.
+    const float3 hit_pos = add3(optixGetWorldRayOrigin(), mul3(optixGetRayTmax(), optixGetWorldRayDirection()));
+
+    // For a sphere centered at C with radius R: normal = (hit_pos - C) / R
+    // We'll store center and radius in the SBT record for generality.
+    const float3 center = make_float3(0.0f, 0.0f, 5.0f);
+    //const float radius = 1.0f;
+    const float3 normal = normalize3(sub3(hit_pos, center));
+
+    // Hardcoded light direction.
+    const float3 light_dir = normalize3(make_float3(-1.0f, -1.0f, -1.0f));
+
+    const float NoL = fmaxf(0.0f, normal.x * light_dir.x + normal.y * light_dir.y + normal.z * light_dir.z);
+
+    float3 color = make_float3(
+        hitgroup_data->albedo.x * NoL,
+        hitgroup_data->albedo.y * NoL,
+        hitgroup_data->albedo.z * NoL);
+
+    // Tone map and gamma, same as the miss shader.
+    const float exposure = 1.0f;
+    //const float exposure = 0.0002f;
+    color.x = 1.0f - expf(-color.x * exposure);
+    color.y = 1.0f - expf(-color.y * exposure);
+    color.z = 1.0f - expf(-color.z * exposure);
+    color.x = powf(fmaxf(color.x, 0.0f), 1.0f / 2.2f);
+    color.y = powf(fmaxf(color.y, 0.0f), 1.0f / 2.2f);
+    color.z = powf(fmaxf(color.z, 0.0f), 1.0f / 2.2f);
+
+    const unsigned int x = optixGetLaunchIndex().x;
+    const unsigned int y = optixGetLaunchIndex().y;
+    const unsigned int index = y * params.width + x;
+
+    params.image[index] = make_uchar4(
+        static_cast<unsigned char>(255.0f * fminf(color.x, 1.0f)),
+        static_cast<unsigned char>(255.0f * fminf(color.y, 1.0f)),
+        static_cast<unsigned char>(255.0f * fminf(color.z, 1.0f)),
+        255);
+    
+    //params.image[index] = make_uchar4(255, 0, 0, 255);
+}
 
 extern "C" __global__
 void __miss__sky()

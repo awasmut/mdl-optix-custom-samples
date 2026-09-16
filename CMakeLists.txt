@@ -37,9 +37,10 @@ add_custom_command(
         -rdc=true
         -I${OPTIX_ROOT}/include
         -I${MDL_SDK_ROOT}/include
+        -I${CMAKE_CURRENT_SOURCE_DIR}/include
         -o ${SKY_PTX}
         ${SKY_CU}
-    DEPENDS ${SKY_CU}
+    DEPENDS ${SKY_CU} ${CMAKE_CURRENT_SOURCE_DIR}/include/shared.hpp
     COMMENT "Compiling OptiX sky.cu -> sky.ptx"
     VERBATIM
 )
@@ -76,6 +77,7 @@ add_custom_command(
 target_include_directories(mdl_optix9_sky PRIVATE
     ${OPTIX_ROOT}/include
     ${MDL_SDK_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(mdl_optix9_sky PRIVATE
