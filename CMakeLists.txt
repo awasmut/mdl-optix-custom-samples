@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
+include(FetchContent)
+
 project(mdl_optix9_sky LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -25,6 +27,19 @@ else()
 endif()
 
 find_package(CUDAToolkit REQUIRED)
+find_package(OpenGL REQUIRED)
+
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY  https://github.com/glfw/glfw.git
+    GIT_TAG         3.5.1
+    GIT_SHALLOW     TRUE
+)
+FetchContent_MakeAvailable(glfw)
 
 set(SKY_CU ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.cu)
 set(SKY_PTX ${CMAKE_CURRENT_BINARY_DIR}/sky.ptx)    
@@ -49,14 +64,12 @@ add_custom_target(
     DEPENDS ${SKY_PTX}
 )
 
-
-
 add_executable(mdl_optix9_sky
     src/main.cpp
     src/mdl_loader.cpp
     src/mdl_sky.cpp
+    external/glad/src/glad.c
 )
-
 add_dependencies(mdl_optix9_sky mdl_optix9_sky_ptx)
 
 target_compile_definitions(
@@ -78,10 +91,13 @@ target_include_directories(mdl_optix9_sky PRIVATE
     ${OPTIX_ROOT}/include
     ${MDL_SDK_ROOT}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    external/glad/include
 )
 
 target_link_libraries(mdl_optix9_sky PRIVATE
     CUDA::cudart
+    OpenGL::GL
+    glfw
 )
 
 set_target_properties(mdl_optix9_sky PROPERTIES

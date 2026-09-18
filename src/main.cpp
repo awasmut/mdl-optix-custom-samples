@@ -16,6 +16,10 @@
 #include <mi/neuraylib/imdl_execution_context.h>
 #include <mi/neuraylib/target_code_types.h>
 
+#include <glad/glad.h>
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -504,7 +508,32 @@ int main(int argc, char** argv)
         save_ppm("perez_sun_and_sky.ppm", host_pixels, width, height);
         std::cout << "Wrote perez_sun_and_sky.ppm\n";
 
+        // ---------------------------------------------------------------
+        // Window
+        // ---------------------------------------------------------------
+        auto glfw_result = glfwInit();
+        if (glfw_result) throw std::runtime_error("Failed to initialize glfw.");
+        
+        GLFWwindow* window = glfwCreateWindow(1280, 720, "OptiX Sample", nullptr, nullptr);
+        if  (!window) throw std::runtime_error("Failed to open glfw window.");
+
+        glfwMakeContextCurrent(window);
+
+        auto glad_result = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+        if (!glad_result) throw std::runtime_error("Could not load OpenGL.");
+
+        while(!glfwWindowShouldClose(window)) {
+            glfwPollEvents();
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+
+            // TODO: present result
+
+            glfwSwapBuffers(window);
+        }
+
+        // ---------------------------------------------------------------
         // Cleanup
+        // ---------------------------------------------------------------
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_params)));
         CUDA_CHECK(cudaFree(device_pixels));
         CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_callable_record)));
